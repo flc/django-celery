@@ -17,6 +17,7 @@ from django.conf import settings
 
 from celery.utils.timeutils import maybe_timedelta
 
+from .db import commit_on_success, get_queryset, rollback_unless_managed
 from .utils import now
 
 
@@ -105,22 +106,16 @@ class ResultManager(ExtendedManager):
         """Get all expired task results."""
         return self.filter(date_done__lt=now() - maybe_timedelta(expires))
 
-    @transaction.commit_manually
     def delete_expired(self, expires):
         """Delete all expired taskset results."""
-        try:
+        meta = self.model._meta
+        with commit_on_success():
             self.get_all_expired(expires).update(hidden=True)
             cursor = self.connection_for_write().cursor()
             cursor.execute(
-                'DELETE FROM %s WHERE hidden=%%s' % (
-                    self.model._meta.db_table, ),
+                'DELETE FROM {0.db_table} WHERE hidden=%s'.format(meta),
                 (True, ),
             )
-        except:
-            transaction.rollback()
-            raise
-        else:
-            transaction.commit()
 
 
 class PeriodicTaskManager(ExtendedManager):
